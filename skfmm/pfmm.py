@@ -32,17 +32,19 @@ def pre_process_args(phi, dx, narrow, periodic, ext_mask=None):
     periodic_data = 0
     if isinstance(periodic, bool):
         if periodic:
-            periodic_data = int(2 ** phi.ndim - 1)
+            periodic_data = int(2**phi.ndim - 1)
     else:
         if hasattr(periodic, "__len__") and len(periodic) == phi.ndim:
             for i, value in enumerate(periodic):
                 if value:
                     periodic_data |= 1 << i
         else:
-            raise ValueError("parameter \"periodic\" must be of type bool or sequence of type bool of length phi.ndim.")
+            raise ValueError(
+                'parameter "periodic" must be of type bool or sequence of type bool of length phi.ndim.'
+            )
 
     if narrow < 0:
-        raise ValueError("parameter \"narrow\" must be greater than or equal to zero.")
+        raise ValueError('parameter "narrow" must be greater than or equal to zero.')
 
     return phi, dx, flag, ext_mask, periodic_data
 
@@ -52,14 +54,13 @@ def post_process_result(result):
     post-process results from the c module (add mask)
     """
     if (result == float_info.max).any():
-        mask = (result == float_info.max)
+        mask = result == float_info.max
         result[mask] = 0
         result = np.ma.MaskedArray(result, mask)
     return result
 
 
-def distance(phi, dx=1.0, self_test=False, order=2,
-             narrow=0.0, periodic=False):
+def distance(phi, dx=1.0, self_test=False, order=2, narrow=0.0, periodic=False):
     """Return the signed distance from the zero contour of the array phi.
 
     Parameters
@@ -105,16 +106,36 @@ def distance(phi, dx=1.0, self_test=False, order=2,
         of phi at the given point.
 
     """
-    phi, dx, flag, ext_mask, periodic = \
-        pre_process_args(phi, dx, narrow, periodic)
-    d = cFastMarcher(phi, dx, flag, None, ext_mask,
-                     int(self_test), DISTANCE, order, narrow, periodic)
+    phi, dx, flag, ext_mask, periodic = pre_process_args(phi, dx, narrow, periodic)
+    d = cFastMarcher(
+        phi,
+        dx,
+        flag,
+        None,
+        ext_mask,
+        int(self_test),
+        DISTANCE,
+        order,
+        narrow,
+        periodic,
+        target_idx=-1,
+        margin=0,
+    )
     d = post_process_result(d)
     return d
 
 
-def travel_time(phi, speed, dx=1.0, self_test=False, order=2,
-                narrow=0.0, periodic=False):
+def travel_time(
+    phi,
+    speed,
+    dx=1.0,
+    self_test=False,
+    order=2,
+    narrow=0.0,
+    periodic=False,
+    early_exit_target=None,
+    early_exit_margin=0,
+):
     """Return the travel from the zero contour of the array phi given the
     scalar velocity field speed.
 
@@ -158,6 +179,10 @@ def travel_time(phi, speed, dx=1.0, self_test=False, order=2,
                individual directions. The default value is False,
                i.e., no periodic boundaries in any direction.
 
+    early_exit_target : A point, upon reaching which to stop calculating the vector field.
+
+    early_exit_margin : How much past to go beyond `early_exit_target`
+
     Returns
     -------
     t : an array the same shape as phi
@@ -167,16 +192,43 @@ def travel_time(phi, speed, dx=1.0, self_test=False, order=2,
         than or equal to zero the return value will be a masked array.
 
     """
-    phi, dx, flag, ext_mask, periodic \
-        = pre_process_args(phi, dx, narrow, periodic)
-    t = cFastMarcher(phi, dx, flag, speed, ext_mask,
-                     int(self_test), TRAVEL_TIME, order, narrow, periodic)
+    phi, dx, flag, ext_mask, periodic = pre_process_args(phi, dx, narrow, periodic)
+
+    if early_exit_target is None:
+        target_idx = -1
+        margin = 0
+    else:
+        target_idx = int(np.ravel_multi_index(early_exit_target, phi.shape))
+        margin = int(early_exit_margin)
+
+    t = cFastMarcher(
+        phi,
+        dx,
+        flag,
+        speed,
+        ext_mask,
+        int(self_test),
+        TRAVEL_TIME,
+        order,
+        narrow,
+        periodic,
+        target_idx,
+        margin,
+    )
     t = post_process_result(t)
     return t
 
 
-def extension_velocities(phi, speed, dx=1.0, self_test=False, order=2,
-                         ext_mask=None, narrow=0.0, periodic=False):
+def extension_velocities(
+    phi,
+    speed,
+    dx=1.0,
+    self_test=False,
+    order=2,
+    ext_mask=None,
+    narrow=0.0,
+    periodic=False,
+):
     """Extend the velocities defined at the zero contour of phi, in the
     normal direction, to the rest of the domain. Extend the velocities
     such that grad f_ext dot grad d = 0 where where f_ext is the
@@ -233,12 +285,24 @@ def extension_velocities(phi, speed, dx=1.0, self_test=False, order=2,
         extension velocities f_ext.
 
     """
-    phi, dx, flag, ext_mask, periodic = \
-        pre_process_args(phi, dx, narrow, periodic, ext_mask)
+    phi, dx, flag, ext_mask, periodic = pre_process_args(
+        phi, dx, narrow, periodic, ext_mask
+    )
 
-    distance, f_ext = cFastMarcher(phi, dx, flag, speed, ext_mask,
-                                   int(self_test), EXTENSION_VELOCITY,
-                                   order, narrow, periodic)
+    distance, f_ext = cFastMarcher(
+        phi,
+        dx,
+        flag,
+        speed,
+        ext_mask,
+        int(self_test),
+        EXTENSION_VELOCITY,
+        order,
+        narrow,
+        periodic,
+        target_idx=-1,
+        margin=0,
+    )
     distance = post_process_result(distance)
     f_ext = post_process_result(f_ext)
 
