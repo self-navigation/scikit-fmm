@@ -38,6 +38,24 @@ public:
   };
   Snapshot checkpoint() const;
   void restore(const Snapshot &state);
+  struct InitialPoint {
+    int address;
+    long long flag;
+    double distance;
+    int heapptr;
+    bool operator==(const InitialPoint &other) const {
+      return address == other.address && flag == other.flag &&
+             distance == other.distance && heapptr == other.heapptr;
+    }
+  };
+  struct Initialization {
+    std::vector<InitialPoint> active;
+    heap::Snapshot frontier;
+    bool operator==(const Initialization &other) const;
+    std::size_t arrayBytes() const;
+  };
+  Initialization initialization() const;
+  void setDependencies(long long *first_read) { first_read_ = first_read; }
   std::size_t batchCount() const { return batches_; }
   bool complete() const { return complete_; }
   std::size_t arrayBytes() const;
@@ -70,8 +88,14 @@ private:
   bool self_test_;
   std::size_t batches_;
   bool complete_;
+  long long *first_read_;
 
 protected:
+  void recordDependency(int address) {
+    if (first_read_ && first_read_[address] < 0)
+      first_read_[address] = static_cast<long long>(batches_) + 1;
+  }
+
   // derived classes must implement these functions
   virtual void initalizeFrozen() = 0;
   virtual double updatePointOrderTwo(int i) = 0;
@@ -100,12 +124,15 @@ protected:
       else if (newc == shape_[dim] + 1)
         newc = 1;
       coord[dim] = newc;
-      return _getIndex(coord);
+      int newa = _getIndex(coord);
+      recordDependency(newa);
+      return newa;
     }
 
     if (newc >= shape_[dim] || newc < 0)
       return -1;
     int newa = current + dir * shift_[dim];
+    recordDependency(newa);
     if (flag_[newa] == flag)
       return -1;
     return newa;

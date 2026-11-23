@@ -1,27 +1,30 @@
-"""Resumable travel-time marching with fixed inputs."""
+"""Resumable travel-time marching and checked input replay."""
 
 import operator
 
 import numpy as np
 
 from .cfmm import (cStateAdvance, cStateCheckpoint, cStateCreate, cStateFlags,
-                   cStateRestore, cStateResult, cStateStats)
+                   cStateReplay, cStateRestore, cStateResult, cStateStats)
 from .pfmm import post_process_result, pre_process_args
 
 
 class TravelTimeState:
-    """Pause and restore a complete-domain solve without changing its inputs.
+    """Pause, restore, and optionally replay a complete-domain solve.
 
     Inputs are copied. Checkpoints belong to one state and stay in memory.
-    Early exit, narrow bands, periodic grids, and input updates are not
-    supported by this API. Use one state per serial caller.
+    Set track_dependencies=True to allow checked speed and mask updates.
+    Phi, spacing, shape, and order stay fixed. Early exit, narrow bands, and
+    periodic grids are unsupported. Use one state per serial caller.
     """
 
-    def __init__(self, phi, speed, dx=1.0, self_test=False, order=2):
+    def __init__(self, phi, speed, dx=1.0, self_test=False, order=2,
+                 track_dependencies=False):
         if np.ma.is_masked(speed):
             raise ValueError("put obstacle masks on phi, not speed")
         phi, dx, flags, _, _ = pre_process_args(phi, dx, 0.0, False)
-        self._handle = cStateCreate(phi, speed, dx, flags, order, int(self_test))
+        self._handle = cStateCreate(phi, speed, dx, flags, order, int(self_test),
+                                   bool(track_dependencies))
 
     def advance(self, batches=None):
         """Accept up to batches equal-time groups; return True when complete.
@@ -67,3 +70,16 @@ class TravelTimeState:
     def restore(self, checkpoint):
         """Restore a checkpoint from this state, leaving the checkpoint intact."""
         cStateRestore(self._handle, checkpoint)
+
+    def replay(self, speed, mask, checkpoints):
+        """Try new inputs from a safe checkpoint of a complete tracked state.
+
+        Return status replay, unchanged, or full_required with diagnostics.
+        replay installs the new inputs but does not finish the march; call
+        advance() next. It also invalidates every old checkpoint. Other
+        statuses leave the state and its checkpoints unchanged.
+        """
+        if np.ma.is_masked(speed):
+            raise ValueError("put obstacle masks in mask, not speed")
+        return cStateReplay(self._handle, speed, np.asarray(mask, dtype=bool),
+                            checkpoints)

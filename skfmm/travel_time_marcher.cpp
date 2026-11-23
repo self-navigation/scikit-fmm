@@ -103,6 +103,7 @@ double travelTimeMarcher::solveQuadratic(int i, const double &a,
                                          const double &b,
                                          double &c)
 {
+  recordDependency(i);
   c -= 1/pow(speed_[i],2);
   double r0=0;
   double det = pow(b,2)-4*a*c;

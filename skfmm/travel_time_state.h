@@ -8,3 +8,4 @@ PyObject *state_flags(PyObject *, PyObject *);
 PyObject *state_checkpoint(PyObject *, PyObject *);
 PyObject *state_restore(PyObject *, PyObject *);
 PyObject *state_stats(PyObject *, PyObject *);
+PyObject *state_replay(PyObject *, PyObject *);

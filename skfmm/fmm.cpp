@@ -35,6 +35,7 @@ static PyMethodDef fmm_methods[] = {{"cFastMarcher",
                                     {"cStateCheckpoint", state_checkpoint, METH_O, NULL},
                                     {"cStateRestore", state_restore, METH_VARARGS, NULL},
                                     {"cStateStats", state_stats, METH_O, NULL},
+                                    {"cStateReplay", state_replay, METH_VARARGS, NULL},
                                     {NULL, NULL, 0, NULL}};
 
 #if PY_MAJOR_VERSION >= 3

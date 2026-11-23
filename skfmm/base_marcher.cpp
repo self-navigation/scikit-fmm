@@ -34,6 +34,7 @@ baseMarcher::baseMarcher(double *phi, double *dx, long long *flag,
   target_T_ = maxDouble;
   batches_ = 0;
   complete_ = false;
+  first_read_ = 0;
 
   for (int i = 0; i < dim_; i++) {
     shape_[i] = shape[i];
@@ -266,6 +267,29 @@ void baseMarcher::restore(const Snapshot &state) {
   batches_ = state.batches;
   complete_ = state.complete;
   target_T_ = state.target_T;
+}
+
+baseMarcher::Initialization baseMarcher::initialization() const {
+  Initialization state;
+  for (int i = 0; i < size_; i++)
+    if (flag_[i] == Frozen || flag_[i] == Narrow)
+      state.active.push_back({i, flag_[i], distance_[i], heapptr_[i]});
+  state.frontier = heap_->snapshot();
+  return state;
+}
+
+bool baseMarcher::Initialization::operator==(const Initialization &other) const {
+  return active == other.active &&
+         frontier.distance == other.frontier.distance &&
+         frontier.address == other.frontier.address &&
+         frontier.backPointer == other.frontier.backPointer &&
+         frontier.heap == other.frontier.heap;
+}
+
+std::size_t baseMarcher::Initialization::arrayBytes() const {
+  return active.size() * sizeof(InitialPoint) +
+         frontier.distance.size() * sizeof(double) +
+         (frontier.address.size() + frontier.backPointer.size() + frontier.heap.size()) * sizeof(int);
 }
 
 std::size_t baseMarcher::arrayBytes() const {
