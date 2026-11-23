@@ -7,6 +7,8 @@
 #include "heap.h"
 #include "math.h"
 #include <vector>
+#include <algorithm>
+#include <stdexcept>
 
 extern "C" {
 
@@ -30,6 +32,8 @@ baseMarcher::baseMarcher(double *phi, double *dx, long long *flag,
   early_exit_margin_cells_ = 0;
   early_exit_margin_T_ = 0.0;
   target_T_ = maxDouble;
+  batches_ = 0;
+  complete_ = false;
 
   for (int i = 0; i < dim_; i++) {
     shape_[i] = shape[i];
@@ -45,19 +49,41 @@ baseMarcher::baseMarcher(double *phi, double *dx, long long *flag,
 }
 
 void baseMarcher::march() {
+  initialize();
+  if (error_ != 0)
+    return;
+  advance();
+  for (int i = 0; i < size_; i++)
+    if (flag_[i] != Frozen)
+      distance_[i] = maxDouble;
+  cleanUp();
+}
+
+void baseMarcher::initialize(bool reserve_grid) {
+  if (heap_)
+    throw std::logic_error("marcher is already initialized");
   initalizeFrozen();
   if (early_exit_target_ >= 0 && flag_[early_exit_target_] == Frozen)
     target_T_ = fabs(distance_[early_exit_target_]);
 
   int maxHeap = 0;
-  for (int i = 0; i < size_; i++)
+  int frozenCount = 0;
+  for (int i = 0; i < size_; i++) {
     if (flag_[i] == Far)
       maxHeap++;
-  heap_ = new heap(maxHeap, self_test_);
+    if (flag_[i] == Frozen)
+      frozenCount++;
+  }
+  if (!frozenCount) {
+    error_ = 2;
+    return;
+  }
+  heap_ = new heap(reserve_grid ? size_ : maxHeap, self_test_);
   heapptr_ = new int[size_];
+  std::fill(heapptr_, heapptr_ + size_, -1);
   initalizeNarrow();
-  solve();
-  cleanUp();
+  complete_ = heap_->empty();
+  error_ = 0;
 }
 
 baseMarcher::~baseMarcher() {
@@ -113,31 +139,34 @@ void baseMarcher::initalizeNarrow() {
 //       into the heap
 //     - if the neighbor is already in the heap update the
 //       distance value.
-void baseMarcher::solve() {
-  int frozenCount = 0;
-  for (int i = 0; i < size_; i++)
-    if (flag_[i] == Frozen)
-      frozenCount++;
-  if (!frozenCount) {
-    error_ = 2;
-    return;
-  }
+bool baseMarcher::advance(int batch_limit) {
+  if (!heap_ || error_ != 0)
+    throw std::logic_error("marcher is not initialized");
+  if (batch_limit < -1)
+    throw std::invalid_argument("batch limit must be nonnegative or -1");
+  if (complete_)
+    return true;
   int i = 0;
   std::vector<int> toFreeze;
 
   while (!heap_->empty()) {
+    if (batch_limit >= 0 && i == batch_limit)
+      return false;
     toFreeze.clear();
     i++;
     double value = heap_->peek();
     int addr = 0;
 
     if ((narrow_ != 0) && (fabs(value) > narrow_)) {
+      complete_ = true;
       break;
     }
 
     if (target_T_ != maxDouble &&
-        fabs(value) > target_T_ + early_exit_margin_T_)
+        fabs(value) > target_T_ + early_exit_margin_T_) {
+      complete_ = true;
       break;
+    }
 
     heap_->pop(&addr, &value);
     flag_[addr] = Frozen;
@@ -210,16 +239,42 @@ void baseMarcher::solve() {
         } // for each direction
       } // for each dimension
     }
+    batches_++;
   } // main loop of Fast Marching Method
 
-  // add back mask here. The python wrapper will look for elements
-  // equal to maxDouble and add the mask back
-  for (int i = 0; i < size_; i++) {
-    if (flag_[i] != Frozen)
-      distance_[i] = maxDouble;
-  }
-  error_ = 0;
-  return;
+  complete_ = true;
+  return true;
+}
+
+baseMarcher::Snapshot baseMarcher::checkpoint() const {
+  Snapshot state;
+  state.distance.assign(distance_, distance_ + size_);
+  state.flags.assign(flag_, flag_ + size_);
+  state.heapptr.assign(heapptr_, heapptr_ + size_);
+  state.frontier = heap_->snapshot();
+  state.batches = batches_;
+  state.complete = complete_;
+  state.target_T = target_T_;
+  return state;
+}
+
+void baseMarcher::restore(const Snapshot &state) {
+  std::copy(state.distance.begin(), state.distance.end(), distance_);
+  std::copy(state.flags.begin(), state.flags.end(), flag_);
+  std::copy(state.heapptr.begin(), state.heapptr.end(), heapptr_);
+  heap_->restore(state.frontier);
+  batches_ = state.batches;
+  complete_ = state.complete;
+  target_T_ = state.target_T;
+}
+
+std::size_t baseMarcher::arrayBytes() const {
+  return static_cast<std::size_t>(size_) * sizeof(int) + heap_->arrayBytes();
+}
+
+std::size_t baseMarcher::checkpointBytes() const {
+  return static_cast<std::size_t>(size_) *
+         (sizeof(double) + sizeof(long long) + sizeof(int)) + heap_->snapshotBytes();
 }
 
 } // extern "C"

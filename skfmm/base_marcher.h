@@ -1,5 +1,6 @@
 // base_marcher.h
 #pragma once
+#include "heap.h"
 const unsigned int MaximumDimension = 12;
 const char Far = 0;
 const char Narrow = 1;
@@ -10,8 +11,6 @@ const char Mask = 3;
 using namespace std;
 #define doubleEpsilon numeric_limits<double>::epsilon()
 #define maxDouble numeric_limits<double>::max()
-
-class heap;
 
 extern "C" {
 
@@ -26,9 +25,26 @@ public:
   int getError() const { return error_; }
   void setEarlyExit(int target_addr, int margin_cells);
 
+  void initialize(bool reserve_grid = false);
+  bool advance(int batch_limit = -1);
+  struct Snapshot {
+    std::vector<double> distance;
+    std::vector<long long> flags;
+    std::vector<int> heapptr;
+    heap::Snapshot frontier;
+    std::size_t batches;
+    bool complete;
+    double target_T;
+  };
+  Snapshot checkpoint() const;
+  void restore(const Snapshot &state);
+  std::size_t batchCount() const { return batches_; }
+  bool complete() const { return complete_; }
+  std::size_t arrayBytes() const;
+  std::size_t checkpointBytes() const;
+
 private:
   void initalizeNarrow();
-  void solve();
   void _setIndex(int current, int coord[MaximumDimension]) {
     int rem = current;
     for (int i = 0; i < dim_; i++) {
@@ -52,6 +68,8 @@ private:
   int shift_[MaximumDimension];
   int periodic_;
   bool self_test_;
+  std::size_t batches_;
+  bool complete_;
 
 protected:
   // derived classes must implement these functions

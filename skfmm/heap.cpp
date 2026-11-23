@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <limits>
 #include <stdexcept>
+#include <algorithm>
 
 heap::heap(int maxLength, bool selfTest)
 {
@@ -53,7 +54,7 @@ heap::~heap()
 
 int heap::push(int address, double value)
 {
-  if (heapLength_==maxLength_)
+  if (listLength_==maxLength_)
     throw std::runtime_error("heap push error: heap full\n");
   heap_[heapLength_]            = listLength_;
   address_[listLength_]         = address;
@@ -160,6 +161,40 @@ bool heap::empty() const
 {
   if (heapLength_==0) return true;
   return false;
+}
+
+heap::Snapshot heap::snapshot() const
+{
+  Snapshot state;
+  state.distance.assign(distance_, distance_ + listLength_);
+  state.address.assign(address_, address_ + listLength_);
+  state.backPointer.assign(backPointer_, backPointer_ + listLength_);
+  state.heap.assign(heap_, heap_ + heapLength_);
+  return state;
+}
+
+void heap::restore(const Snapshot &state)
+{
+  if (state.distance.size() > static_cast<std::size_t>(maxLength_))
+    throw std::invalid_argument("snapshot exceeds heap capacity");
+  listLength_ = state.distance.size();
+  heapLength_ = state.heap.size();
+  std::copy(state.distance.begin(), state.distance.end(), distance_);
+  std::copy(state.address.begin(), state.address.end(), address_);
+  std::copy(state.backPointer.begin(), state.backPointer.end(), backPointer_);
+  std::copy(state.heap.begin(), state.heap.end(), heap_);
+  if (selfTest_) test();
+}
+
+std::size_t heap::arrayBytes() const
+{
+  return static_cast<std::size_t>(maxLength_) * (sizeof(double) + 3 * sizeof(int));
+}
+
+std::size_t heap::snapshotBytes() const
+{
+  return static_cast<std::size_t>(listLength_) * (sizeof(double) + 2 * sizeof(int))
+       + static_cast<std::size_t>(heapLength_) * sizeof(int);
 }
 
 void heap::test() const

@@ -50,6 +50,7 @@ __docformat__ = 'restructuredtext'
 
 from .pfmm import distance, travel_time, extension_velocities
 from .heap import heap
+from .state import TravelTimeState
 
 def testing():
     r"""

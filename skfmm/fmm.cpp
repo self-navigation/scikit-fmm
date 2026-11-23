@@ -2,6 +2,7 @@
 // implementation of the fast marching method in fast_marching.cpp
 
 #include "Python.h"
+#define PY_ARRAY_UNIQUE_SYMBOL SKFMM_ARRAY_API
 #include "numpy/ndarrayobject.h"
 
 #ifndef NPY_IN_ARRAY
@@ -13,6 +14,7 @@
 #include "distance_marcher.h"
 #include "extension_velocity_marcher.h"
 #include "travel_time_marcher.h"
+#include "travel_time_state.h"
 
 #include <stdexcept>
 
@@ -26,6 +28,13 @@ static PyMethodDef fmm_methods[] = {{"cFastMarcher",
                                      (PyCFunction)distance_method, METH_VARARGS,
                                      "Entry point for scikit-fmm c extension"
                                      "Use the python wrapper to this function"},
+                                    {"cStateCreate", state_create, METH_VARARGS, NULL},
+                                    {"cStateAdvance", state_advance, METH_VARARGS, NULL},
+                                    {"cStateResult", state_result, METH_O, NULL},
+                                    {"cStateFlags", state_flags, METH_O, NULL},
+                                    {"cStateCheckpoint", state_checkpoint, METH_O, NULL},
+                                    {"cStateRestore", state_restore, METH_VARARGS, NULL},
+                                    {"cStateStats", state_stats, METH_O, NULL},
                                     {NULL, NULL, 0, NULL}};
 
 #if PY_MAJOR_VERSION >= 3

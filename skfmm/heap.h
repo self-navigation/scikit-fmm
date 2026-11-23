@@ -1,4 +1,7 @@
 // heap.h
+#pragma once
+#include <cstddef>
+#include <vector>
 /**************************************************************************/
 /* This class implements a binary min heap data structure to support the  */
 /* fast marching algorithm. A min heap is a list which has the property   */
@@ -38,6 +41,15 @@ class heap
   void       pop(int *address, double *value);
   void       set(int index, double value);
   bool       empty() const;
+
+  struct Snapshot {
+    std::vector<double> distance;
+    std::vector<int> heap, address, backPointer;
+  };
+  Snapshot snapshot() const;
+  void restore(const Snapshot &state);
+  std::size_t arrayBytes() const;
+  std::size_t snapshotBytes() const;
 
   // return the distance of the top element on the heap
   const double &peek() const;

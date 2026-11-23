@@ -31,13 +31,15 @@ srcs = [
   'skfmm/base_marcher.cpp',
   'skfmm/distance_marcher.cpp',
   'skfmm/travel_time_marcher.cpp',
+  'skfmm/travel_time_state.cpp',
   'skfmm/extension_velocity_marcher.cpp',
 ]
 
 py.install_sources(
   ['skfmm/__init__.py',
    'skfmm/pfmm.py',
-   'skfmm/heap.py'],
+   'skfmm/heap.py',
+   'skfmm/state.py'],
   subdir: 'skfmm',
   pure: false,
 )
