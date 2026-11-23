@@ -46,6 +46,8 @@ baseMarcher::baseMarcher(double *phi, double *dx, long long *flag,
 
 void baseMarcher::march() {
   initalizeFrozen();
+  if (early_exit_target_ >= 0 && flag_[early_exit_target_] == Frozen)
+    target_T_ = fabs(distance_[early_exit_target_]);
 
   int maxHeap = 0;
   for (int i = 0; i < size_; i++)
@@ -67,9 +69,7 @@ void baseMarcher::setEarlyExit(int target_addr, int margin_cells) {
   early_exit_target_ = target_addr;
   early_exit_margin_cells_ = margin_cells;
 
-  // Convert cells -> T units.
-  // Conservative: use the smallest dx and assume speed <= 1
-  // If your speed field exceeds 1, scale this externally.
+  // This is a travel-time margin, not a physical radius.
   double min_dx = dx_[0];
   for (int d = 1; d < dim_; d++)
     if (dx_[d] < min_dx)
@@ -128,25 +128,18 @@ void baseMarcher::solve() {
   while (!heap_->empty()) {
     toFreeze.clear();
     i++;
-    double value = 0;
+    double value = heap_->peek();
     int addr = 0;
-    heap_->pop(&addr, &value);
 
     if ((narrow_ != 0) && (fabs(value) > narrow_)) {
       break;
     }
 
-    // early exit
-    if (early_exit_target_ >= 0) {
-      if (addr == early_exit_target_ && target_T_ == maxDouble) {
-        target_T_ = fabs(value);
-      }
-      if (target_T_ != maxDouble &&
-          fabs(value) > target_T_ + early_exit_margin_T_) {
-        break;
-      }
-    }
+    if (target_T_ != maxDouble &&
+        fabs(value) > target_T_ + early_exit_margin_T_)
+      break;
 
+    heap_->pop(&addr, &value);
     flag_[addr] = Frozen;
     finalizePoint(addr, value);
     toFreeze.push_back(addr);
@@ -166,6 +159,8 @@ void baseMarcher::solve() {
 
     for (unsigned int k = 0; k < toFreeze.size(); k++) {
       int addr = toFreeze[k];
+      if (addr == early_exit_target_)
+        target_T_ = fabs(distance_[addr]);
 
       for (int dim = 0; dim < dim_; dim++) {
         for (int j = -1; j < 2; j += 2) // each direction

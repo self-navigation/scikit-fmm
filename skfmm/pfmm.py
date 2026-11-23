@@ -118,8 +118,8 @@ def distance(phi, dx=1.0, self_test=False, order=2, narrow=0.0, periodic=False):
         order,
         narrow,
         periodic,
-        target_idx=-1,
-        margin=0,
+        -1,
+        0,
     )
     d = post_process_result(d)
     return d
@@ -179,9 +179,14 @@ def travel_time(
                individual directions. The default value is False,
                i.e., no periodic boundaries in any direction.
 
-    early_exit_target : A point, upon reaching which to stop calculating the vector field.
+    early_exit_target : tuple of cell indices, optional
+                        stop after accepting this cell and the margin.
+                        Unreachable targets do not stop the march.
 
-    early_exit_margin : How much past to go beyond `early_exit_target`
+    early_exit_margin : nonnegative int, optional
+                        add this value times min(dx) to the target travel
+                        time. This is not a physical radius. Equal-time
+                        groups and all initial source cells stay accepted.
 
     Returns
     -------
@@ -300,8 +305,8 @@ def extension_velocities(
         order,
         narrow,
         periodic,
-        target_idx=-1,
-        margin=0,
+        -1,
+        0,
     )
     distance = post_process_result(distance)
     f_ext = post_process_result(f_ext)
