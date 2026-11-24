@@ -55,6 +55,8 @@ public:
     std::size_t arrayBytes() const;
   };
   Initialization initialization() const;
+  // Conservative fixed-phi support for initial Frozen and Narrow inputs.
+  bool initializationMayRead(int address) const;
   void setDependencies(long long *first_read) { first_read_ = first_read; }
   std::size_t batchCount() const { return batches_; }
   bool complete() const { return complete_; }

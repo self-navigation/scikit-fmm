@@ -79,6 +79,9 @@ class TravelTimeState:
         Reason complete_state_reused keeps the completed march and needs no
         checkpoint. Otherwise call advance() to finish the restored march.
         Other statuses leave the state and its checkpoints unchanged.
+        initialization_check reports unchanged_support when fixed-phi support
+        proves initialization unchanged, full_comparison for reconstruction,
+        or not_needed when replay returns before the initialization check.
         """
         if np.ma.is_masked(speed):
             raise ValueError("put obstacle masks in mask, not speed")

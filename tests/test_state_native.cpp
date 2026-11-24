@@ -1,10 +1,61 @@
 // Run with address and undefined-behavior sanitizers.
 #include "travel_time_marcher.h"
 
+#include <algorithm>
 #include <cassert>
 #include <random>
 #include <stdexcept>
 #include <vector>
+
+static void test_initialization_support() {
+  int shape[2] = {11, 13};
+  int size = shape[0] * shape[1];
+  double dx[2] = {0.1, 0.2};
+  std::vector<double> phi(size, 1.0), speed(size, 1.0), distance(size, 0.0);
+  std::vector<long long> flags(size, Far);
+  phi[5 * shape[1] + 6] = -1.0;
+  phi[0] = 0.0;
+  flags[0] = Mask;
+  phi[size - 1] = -1.0;
+  flags[size - 1] = flags[size - 2] = flags[size - 1 - shape[1]] = Mask;
+  auto input_flags = flags;
+  std::mt19937 random(73);
+  for (int order : {1, 2}) {
+    flags = input_flags;
+    std::fill(distance.begin(), distance.end(), 0.0);
+    travelTimeMarcher state(phi.data(), dx, flags.data(), distance.data(),
+                            2, shape, true, order, speed.data(), 0.0, 0);
+    std::vector<bool> support(size);
+    for (int i = 0; i < size; i++)
+      support[i] = state.initializationMayRead(i);
+    assert(support[0] && support[1] && support[shape[1]]);
+    assert(support[size - 1] && support[size - 3]);
+    assert(!support[2 * shape[1] + 6]);
+    state.initialize(true);
+    assert(state.getError() == 0);
+    auto signature = state.initialization();
+    // Dense random edits outside the certificate must leave every initial
+    // active value and the exact heap representation unchanged.
+    for (int run = 0; run < 30; run++) {
+      auto changed_flags = input_flags;
+      auto changed_speed = speed;
+      std::vector<double> changed_distance(size, 0.0);
+      for (int i = 0; i < size; i++)
+        if (!support[i]) {
+          changed_flags[i] = random() % 2 ? Mask : Far;
+          changed_speed[i] = (random() % 20 + 1) / 5.0;
+        }
+      travelTimeMarcher changed(phi.data(), dx, changed_flags.data(),
+                                changed_distance.data(), 2, shape, true, order,
+                                changed_speed.data(), 0.0, 0);
+      for (int i = 0; i < size; i++)
+        assert(changed.initializationMayRead(i) == support[i]);
+      changed.initialize(true);
+      assert(changed.getError() == 0);
+      assert(changed.initialization() == signature);
+    }
+  }
+}
 
 static void test_dependencies() {
   int shape[1] = {17};
@@ -73,6 +124,7 @@ static void test_dependencies() {
 }
 
 int main() {
+  test_initialization_support();
   test_dependencies();
   heap small(2, true);
   int address;

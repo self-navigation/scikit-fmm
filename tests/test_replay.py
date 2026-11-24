@@ -207,7 +207,8 @@ def test_repeated_unread_edits_reuse_the_complete_state_without_checkpoints(orde
         info = state.replay(speed, mask, [])
         assert info == dict(status="replay", reason="complete_state_reused",
                             changed_cells=1, reused_batches=completed_batches,
-                            first_affected_batch=-1)
+                            first_affected_batch=-1,
+                            initialization_check="unchanged_support")
         assert state.stats["complete"]
         assert state.stats["batches"] == completed_batches
         assert_same(state.result(), reference(phi, speed, mask, order))

@@ -113,12 +113,14 @@ bool same_initialization(State &state, double *speed, const std::vector<char> &m
 }
 
 PyObject *replay_report(const char *status, const char *reason, std::size_t changed,
-                        std::size_t reused, long long first_affected) {
-  return Py_BuildValue("{s:s,s:s,s:K,s:K,s:L}",
+                        std::size_t reused, long long first_affected,
+                        const char *initialization_check = "not_needed") {
+  return Py_BuildValue("{s:s,s:s,s:K,s:K,s:L,s:s}",
                        "status", status, "reason", reason,
                        "changed_cells", static_cast<unsigned long long>(changed),
                        "reused_batches", static_cast<unsigned long long>(reused),
-                       "first_affected_batch", first_affected);
+                       "first_affected_batch", first_affected,
+                       "initialization_check", initialization_check);
 }
 } // namespace
 
@@ -366,8 +368,19 @@ PyObject *state_replay(PyObject *, PyObject *args) {
         }
     if (candidates.empty() && !complete_reuse)
       return replay_report("full_required", "no_safe_checkpoint", changed.size(), 0, first_affected);
-    if (!same_initialization(*state, next_speed, next_mask))
-      return replay_report("full_required", "initialization_changed", changed.size(), 0, first_affected);
+    // A local support query visits at most 1 + 2*ndim possible source cells.
+    // For dense edits, use the full comparison without repeated local scans.
+    bool compare_initialization = changed.size() > state->phi.size() / (1 + 2 * state->shape.size());
+    if (!compare_initialization)
+      for (int i : changed)
+        if (state->marcher->initializationMayRead(i)) {
+          compare_initialization = true;
+          break;
+        }
+    const char *initialization_check = compare_initialization ? "full_comparison" : "unchanged_support";
+    if (compare_initialization && !same_initialization(*state, next_speed, next_mask))
+      return replay_report("full_required", "initialization_changed", changed.size(), 0,
+                            first_affected, initialization_check);
 
     Checkpoint *selected = NULL;
     if (!complete_reuse) {
@@ -386,13 +399,15 @@ PyObject *state_replay(PyObject *, PyObject *args) {
           selected = candidate;
       }
       if (!selected)
-        return replay_report("full_required", "no_safe_checkpoint", changed.size(), 0, first_affected);
+        return replay_report("full_required", "no_safe_checkpoint", changed.size(), 0,
+                              first_affected, initialization_check);
     }
 
     std::shared_ptr<int> next_owner = std::make_shared<int>(0);
     std::size_t reused = complete_reuse ? state->marcher->batchCount() : selected->data.batches;
     const char *reason = complete_reuse ? "complete_state_reused" : "checkpoint_replayed";
-    Object result(replay_report("replay", reason, changed.size(), reused, first_affected));
+    Object result(replay_report("replay", reason, changed.size(), reused, first_affected,
+                                initialization_check));
     if (!result)
       return NULL;
     mutating = true;

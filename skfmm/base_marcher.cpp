@@ -278,6 +278,37 @@ baseMarcher::Initialization baseMarcher::initialization() const {
   return state;
 }
 
+bool baseMarcher::initializationMayRead(int address) const {
+  if (periodic_)
+    return true;
+  // Ignore masks: a later edit may expose a previously masked contour.
+  const auto potential_frozen = [this](int i) {
+    if (phi_[i] == 0.0)
+      return true;
+    for (int dim = 0; dim < dim_; dim++) {
+      int coord = (i / shift_[dim]) % shape_[dim];
+      // Match the initializer's product test, including underflow to zero.
+      if (coord > 0 && phi_[i] * phi_[i - shift_[dim]] < 0.0)
+        return true;
+      if (coord + 1 < shape_[dim] && phi_[i] * phi_[i + shift_[dim]] < 0.0)
+        return true;
+    }
+    return false;
+  };
+  if (potential_frozen(address))
+    return true;
+  // Initial Narrow cells are axial neighbors of potential Frozen cells.
+  // Second-order values only use Frozen operands, already in that support.
+  for (int dim = 0; dim < dim_; dim++) {
+    int coord = (address / shift_[dim]) % shape_[dim];
+    if (coord > 0 && potential_frozen(address - shift_[dim]))
+      return true;
+    if (coord + 1 < shape_[dim] && potential_frozen(address + shift_[dim]))
+      return true;
+  }
+  return false;
+}
+
 bool baseMarcher::Initialization::operator==(const Initialization &other) const {
   return active == other.active &&
          frontier.distance == other.frontier.distance &&

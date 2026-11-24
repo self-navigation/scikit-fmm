@@ -86,6 +86,7 @@ The result is a dictionary with these fields:
 | `changed_cells` | Number of cells with different effective inputs. |
 | `reused_batches` | Number of accepted batches retained from the complete state or selected checkpoint; for unchanged inputs, the current batch count. |
 | `first_affected_batch` | First runtime batch that read a changed cell, or -1 if none did. |
+| `initialization_check` | `unchanged_support`, `full_comparison`, or `not_needed`; describes how initial-state equality was checked. |
 
 `replay` installs the new speed and mask. Reason `complete_state_reused` keeps
 the completed march, so the result is ready immediately. Otherwise it restores
@@ -99,9 +100,10 @@ an incomplete state, and disabled tracking raise `ValueError`.
 
 Tracking records the first runtime read of each cell, including reads that
 reject a masked neighbor. A safe checkpoint has fewer completed batches than
-the first affected read. The solver checks that fresh initialization with the
-new inputs has the same source and initial narrow-band state. It also checks
-that changed cells in the checkpoint are Far or Mask and have no heap entry.
+the first affected read. The solver proves that the new inputs keep the same
+source and initial narrow-band state, or reconstructs and compares that state
+exactly. It also checks that changed cells in the checkpoint are Far or Mask
+and have no heap entry.
 These checks apply to speed increases, decreases, and obstacle additions or
 removals. They do not depend on an assumed order of arrival-time changes.
 If every changed cell is unread and is Far or Mask with no heap entry in the
@@ -115,6 +117,24 @@ checkpoint copies or marching. It still invalidates all old checkpoints.
 If a later edit affects a previously read input and no safe checkpoint remains,
 the caller must use a full solve. It does not help edits that affect early
 runtime batches.
+
+For sparse edits, initialization equality can be proved from fixed `phi`.
+Every possible initial Frozen cell is a zero of `phi` or an endpoint of an
+axial edge whose `phi` product is negative. This includes masked contour cells
+that a later edit could expose. Initial Narrow cells can only be axial
+neighbors of those cells. If no effective input change touches this support,
+initialization is unchanged: all initial active flags, values, heap entries,
+and insertion order remain the same. Second-order updates use Frozen operands,
+which are already in the support.
+
+The solver queries this support only near changed cells; it adds no retained
+array or constructor scan. It reports `initialization_check="unchanged_support"`
+when that proof succeeds. Edits inside the support use the existing exact
+reconstruction and report `full_comparison`. Dense edits also use reconstruction
+to bound local-query work: more than `size / (1 + 2 * ndim)` changed cells select
+the full comparison. A return before either check, such as unchanged inputs or
+an empty checkpoint list with no complete-state reuse, reports `not_needed`.
+These diagnostics describe work; the acceptance and fallback rules stay exact.
 
 Ordinary `restore()` keeps accumulated read history for the current inputs,
 even when restoring backward and then forward. Successful replay starts a new
