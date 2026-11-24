@@ -33,7 +33,7 @@ match a fresh `travel_time` call with the same supported inputs.
 | `flags()` | Return a copy: Far=0, Narrow=1, Frozen=2, Mask=3. |
 | `checkpoint(max_bytes=None)` | Copy the numerical state and heap without changing either. |
 | `restore(saved)` | Restore a checkpoint from this instance. The checkpoint remains reusable. |
-| `replay(speed, mask, checkpoints)` | Check new inputs and restore a safe checkpoint, or report that a full solve is required. Requires dependency tracking and a complete state. |
+| `replay(speed, mask, checkpoints)` | Check new inputs and reuse the complete state or a safe checkpoint, or report that a full solve is required. Requires dependency tracking and a complete state. |
 | `stats` | Return completed batch count, domain completion, and array storage sizes. |
 
 Checkpoints preserve raw distances, flags, heap entries in their current
@@ -56,7 +56,6 @@ state = skfmm.TravelTimeState(phi, speed, dx=0.05, order=2,
 checkpoints = [state.checkpoint()]
 while not state.advance(1000):
     checkpoints.append(state.checkpoint())
-checkpoints.append(state.checkpoint())
 
 info = state.replay(new_speed, new_mask, checkpoints)
 if info["status"] == "full_required":
@@ -64,10 +63,11 @@ if info["status"] == "full_required":
     state = skfmm.TravelTimeState(new_phi, new_speed,
                                 dx=0.05, order=2, track_dependencies=True)
 if info["status"] != "unchanged":
-    checkpoints = [state.checkpoint()]
-    while not state.advance(1000):
+    checkpoints = []
+    if not state.stats["complete"]:
         checkpoints.append(state.checkpoint())
-    checkpoints.append(state.checkpoint())
+        while not state.advance(1000):
+            checkpoints.append(state.checkpoint())
 updated = state.result()
 ```
 
@@ -82,13 +82,15 @@ The result is a dictionary with these fields:
 | Field | Meaning |
 | --- | --- |
 | `status` | `replay`, `unchanged`, or `full_required`. |
-| `reason` | `checkpoint_replayed`, `inputs_unchanged`, `initialization_changed`, or `no_safe_checkpoint`. |
+| `reason` | `complete_state_reused`, `checkpoint_replayed`, `inputs_unchanged`, `initialization_changed`, or `no_safe_checkpoint`. |
 | `changed_cells` | Number of cells with different effective inputs. |
-| `reused_batches` | Number of accepted batches in the selected checkpoint; for unchanged inputs, the current batch count. |
+| `reused_batches` | Number of accepted batches retained from the complete state or selected checkpoint; for unchanged inputs, the current batch count. |
 | `first_affected_batch` | First runtime batch that read a changed cell, or -1 if none did. |
 
-`replay` installs the new speed and mask at the selected checkpoint. It does
-not march further; call `advance()` or collect new checkpoints while advancing.
+`replay` installs the new speed and mask. Reason `complete_state_reused` keeps
+the completed march, so the result is ready immediately. Otherwise it restores
+the selected checkpoint; call `advance()` or collect new checkpoints while
+advancing.
 Every checkpoint from before a successful replay becomes invalid, including
 the selected checkpoint. `unchanged` keeps the state and all checkpoints.
 `full_required` also keeps the old state and checkpoints; create a new state
@@ -102,12 +104,23 @@ new inputs has the same source and initial narrow-band state. It also checks
 that changed cells in the checkpoint are Far or Mask and have no heap entry.
 These checks apply to speed increases, decreases, and obstacle additions or
 removals. They do not depend on an assumed order of arrival-time changes.
-An edit in an unread disconnected region may reuse a completed checkpoint.
+If every changed cell is unread and is Far or Mask with no heap entry in the
+complete state, the solver checks initialization and reuses that state directly.
+It keeps the heap, batch count, completion, and read history without creating
+or restoring a checkpoint. The checkpoint list may be empty. Every supplied
+checkpoint is still validated, even when it is not needed.
+
+This path supports repeated edits in unread disconnected regions without
+checkpoint copies or marching. It still invalidates all old checkpoints.
+If a later edit affects a previously read input and no safe checkpoint remains,
+the caller must use a full solve. It does not help edits that affect early
+runtime batches.
 
 Ordinary `restore()` keeps accumulated read history for the current inputs,
 even when restoring backward and then forward. Successful replay starts a new
 checkpoint generation and keeps only the dependency history of the reused
-prefix. On the same build, finishing a replay must match a fresh `travel_time`
+prefix. Complete-state reuse keeps the full read history. On the same build,
+finishing a replay must match a fresh `travel_time`
 solve exactly in reached masks and values.
 
 ## Limits and ownership
@@ -151,7 +164,8 @@ The state tests compare reached masks and values exactly, with first- and
 second-order updates, uniform and random speeds, disconnected maps, ties,
 noncontiguous inputs, repeated restores, and heap self-checks. Replay tests
 cover speed and obstacle changes, repeated edits, source initialization,
-checkpoint invalidation, unread regions, and second-order cases where
+checkpoint invalidation, repeated unread edits without checkpoints, later
+reachable edits, zero-batch initialization checks, and second-order cases where
 arrival times alone cannot identify a safe prefix.
 
 The native test also supports memory checks. Run from the checkout root:

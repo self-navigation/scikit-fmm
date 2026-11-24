@@ -357,44 +357,56 @@ PyObject *state_replay(PyObject *, PyObject *args) {
     if (changed.empty())
       return replay_report("unchanged", "inputs_unchanged", 0,
                             state->marcher->batchCount(), -1);
-    if (candidates.empty())
+    bool complete_reuse = first_affected < 0;
+    if (complete_reuse)
+      for (int i : changed)
+        if (!state->marcher->isInert(i)) {
+          complete_reuse = false;
+          break;
+        }
+    if (candidates.empty() && !complete_reuse)
       return replay_report("full_required", "no_safe_checkpoint", changed.size(), 0, first_affected);
     if (!same_initialization(*state, next_speed, next_mask))
       return replay_report("full_required", "initialization_changed", changed.size(), 0, first_affected);
 
     Checkpoint *selected = NULL;
-    for (Checkpoint *candidate : candidates) {
-      const auto &saved = candidate->data;
-      if (saved.batches > state->marcher->batchCount() ||
-          (first_affected >= 0 && saved.batches >= static_cast<std::size_t>(first_affected)))
-        continue;
-      bool inert = true;
-      for (int i : changed)
-        if ((saved.flags[i] != Far && saved.flags[i] != Mask) || saved.heapptr[i] != -1) {
-          inert = false;
-          break;
-        }
-      if (inert && (!selected || saved.batches > selected->data.batches))
-        selected = candidate;
+    if (!complete_reuse) {
+      for (Checkpoint *candidate : candidates) {
+        const auto &saved = candidate->data;
+        if (saved.batches > state->marcher->batchCount() ||
+            (first_affected >= 0 && saved.batches >= static_cast<std::size_t>(first_affected)))
+          continue;
+        bool inert = true;
+        for (int i : changed)
+          if ((saved.flags[i] != Far && saved.flags[i] != Mask) || saved.heapptr[i] != -1) {
+            inert = false;
+            break;
+          }
+        if (inert && (!selected || saved.batches > selected->data.batches))
+          selected = candidate;
+      }
+      if (!selected)
+        return replay_report("full_required", "no_safe_checkpoint", changed.size(), 0, first_affected);
     }
-    if (!selected)
-      return replay_report("full_required", "no_safe_checkpoint", changed.size(), 0, first_affected);
 
     std::shared_ptr<int> next_owner = std::make_shared<int>(0);
-    std::size_t reused = selected->data.batches;
-    Object result(replay_report("replay", "checkpoint_replayed", changed.size(), reused, first_affected));
+    std::size_t reused = complete_reuse ? state->marcher->batchCount() : selected->data.batches;
+    const char *reason = complete_reuse ? "complete_state_reused" : "checkpoint_replayed";
+    Object result(replay_report("replay", reason, changed.size(), reused, first_affected));
     if (!result)
       return NULL;
     mutating = true;
-    state->marcher->restore(selected->data);
+    if (!complete_reuse)
+      state->marcher->restore(selected->data);
     std::copy(next_speed, next_speed + state->speed.size(), state->speed.begin());
     for (int i : changed) {
       state->flags[i] = next_mask[i] ? Mask : Far;
       state->distance[i] = 0.0;
     }
-    for (long long &read : state->first_read)
-      if (read > static_cast<long long>(reused))
-        read = -1;
+    if (!complete_reuse)
+      for (long long &read : state->first_read)
+        if (read > static_cast<long long>(reused))
+          read = -1;
     state->owner.swap(next_owner);
     return result.release();
   } catch (...) {

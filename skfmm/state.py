@@ -72,12 +72,13 @@ class TravelTimeState:
         cStateRestore(self._handle, checkpoint)
 
     def replay(self, speed, mask, checkpoints):
-        """Try new inputs from a safe checkpoint of a complete tracked state.
+        """Try new inputs on a complete tracked state or a safe checkpoint.
 
         Return status replay, unchanged, or full_required with diagnostics.
-        replay installs the new inputs but does not finish the march; call
-        advance() next. It also invalidates every old checkpoint. Other
-        statuses leave the state and its checkpoints unchanged.
+        replay installs new inputs and invalidates every old checkpoint.
+        Reason complete_state_reused keeps the completed march and needs no
+        checkpoint. Otherwise call advance() to finish the restored march.
+        Other statuses leave the state and its checkpoints unchanged.
         """
         if np.ma.is_masked(speed):
             raise ValueError("put obstacle masks in mask, not speed")

@@ -17,6 +17,10 @@ static void test_dependencies() {
                           1, shape, true, 2, speed.data(), 0.0, 0);
   state.initialize(true);
   assert(state.getError() == 0);
+  assert(!state.isInert(0));
+  assert(!state.isInert(1));
+  assert(state.isInert(10));
+  assert(state.isInert(15));
   auto signature = state.initialization();
   auto initial = state.checkpoint();
   state.setDependencies(first_read.data());
@@ -24,6 +28,9 @@ static void test_dependencies() {
   assert(first_read[2] == 1);
   auto middle = state.checkpoint();
   assert(state.advance());
+  assert(!state.isInert(9));
+  assert(state.isInert(10));
+  assert(state.isInert(15));
   assert(first_read[10] > 0);
   assert(first_read[15] == -1);
   for (long long event : first_read)

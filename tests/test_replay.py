@@ -175,7 +175,7 @@ def test_forward_restore_keeps_reads_of_rejected_masked_neighbors(order):
     assert_same(state.result(), reference(phi, speed, mask, order))
 
 
-def test_unread_disconnected_edit_can_reuse_completed_checkpoint():
+def test_unread_disconnected_edit_prefers_the_complete_state():
     phi, speed, mask = line_inputs()
     mask[[80, 120]] = True
     state = tracked_state(phi, speed, mask)
@@ -184,12 +184,149 @@ def test_unread_disconnected_edit_can_reuse_completed_checkpoint():
     mask[120] = False
     result = state.replay(speed, mask, saved)
     assert result["status"] == "replay"
+    assert result["reason"] == "complete_state_reused"
     assert result["first_affected_batch"] == -1
     assert result["reused_batches"] == completed_batches
     assert state.stats["complete"]
     assert state.flags()[120] == 0
     state.advance()
     assert_same(state.result(), reference(phi, speed, mask))
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_repeated_unread_edits_reuse_the_complete_state_without_checkpoints(order):
+    phi, speed, mask = line_inputs()
+    mask[[80, 120]] = True
+    state = tracked_state(phi, speed, mask, order)
+    state.advance()
+    completed_batches = state.stats["batches"]
+    changes = [(140, 1.6, False), (120, 1.0, False), (140, 1.6, True),
+               (130, 0.0, False), (130, 0.7, False), (140, 1.6, False)]
+    for cell, value, blocked in changes:
+        speed[cell], mask[cell] = value, blocked
+        info = state.replay(speed, mask, [])
+        assert info == dict(status="replay", reason="complete_state_reused",
+                            changed_cells=1, reused_batches=completed_batches,
+                            first_affected_batch=-1)
+        assert state.stats["complete"]
+        assert state.stats["batches"] == completed_batches
+        assert_same(state.result(), reference(phi, speed, mask, order))
+        blocked = mask[80:] | (speed[80:] < np.finfo(float).eps)
+        np.testing.assert_array_equal(state.flags()[80:], np.where(blocked, 3, 0))
+
+
+def test_complete_reuse_copies_inputs_and_invalidates_all_old_checkpoints():
+    phi, speed, mask = line_inputs()
+    mask[80] = True
+    state = tracked_state(phi, speed, mask)
+    saved = finish_with_checkpoints(state)
+    speed[140] = 2.0
+    mask[130] = True
+    expected = reference(phi, speed, mask)
+    info = state.replay(speed, mask, saved)
+    assert info["reason"] == "complete_state_reused"
+    speed[:] = 0.0
+    mask[:] = True
+    assert_same(state.result(), expected)
+    assert state.flags()[130] == 3
+    assert state.flags()[140] == 0
+    for old in saved:
+        with pytest.raises(ValueError):
+            state.restore(old)
+    with pytest.raises(ValueError):
+        state.replay(speed, mask, saved)
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_complete_reuse_keeps_reads_for_later_reachable_and_barrier_edits(order):
+    phi, speed, mask = line_inputs()
+    mask[80] = True
+    state = tracked_state(phi, speed, mask, order)
+    state.advance()
+    speed[140] = 2.0
+    assert state.replay(speed, mask, [])["reason"] == "complete_state_reused"
+    before, flags, stats = state.result(), state.flags(), state.stats
+    for barrier in (False, True):
+        new_speed, new_mask = speed.copy(), mask.copy()
+        if barrier:
+            new_mask[80] = False
+        else:
+            new_speed[20] = 0.5
+        info = state.replay(new_speed, new_mask, [])
+        assert info["status"] == "full_required"
+        assert info["reason"] == "no_safe_checkpoint"
+        assert 0 < info["first_affected_batch"] <= stats["batches"]
+        assert state.stats == stats
+        assert_same(state.result(), before)
+        np.testing.assert_array_equal(state.flags(), flags)
+        fresh = tracked_state(phi, new_speed, new_mask, order)
+        fresh.advance()
+        assert_same(fresh.result(), reference(phi, new_speed, new_mask, order))
+
+
+def test_zero_batch_complete_reuse_still_checks_initialization():
+    phi = np.ones(11)
+    phi[0] = 0.0
+    speed = np.ones(phi.shape)
+    mask = np.ones(phi.shape, dtype=bool)
+    mask[0] = False
+    state = tracked_state(phi, speed, mask)
+    assert state.stats["complete"] and state.stats["batches"] == 0
+    mask[8] = False
+    assert state.replay(speed, mask, [])["reason"] == "complete_state_reused"
+    before, flags, stats = state.result(), state.flags(), state.stats
+    mask[1] = False
+    info = state.replay(speed, mask, [])
+    assert info["status"] == "full_required"
+    assert info["reason"] == "initialization_changed"
+    assert info["first_affected_batch"] == -1
+    assert_same(state.result(), before)
+    np.testing.assert_array_equal(state.flags(), flags)
+    assert state.stats == stats
+
+
+def test_unread_frozen_source_is_not_an_inert_cell():
+    phi = np.ones(11)
+    phi[0] = 0.0
+    speed = np.ones(phi.shape)
+    mask = np.ones(phi.shape, dtype=bool)
+    mask[0] = False
+    state = tracked_state(phi, speed, mask)
+    saved = state.checkpoint()
+    speed[0] = 2.0
+    info = state.replay(speed, mask, [saved])
+    assert info["status"] == "full_required"
+    assert info["reason"] == "no_safe_checkpoint"
+    assert info["first_affected_batch"] == -1
+    state.restore(saved)
+
+
+@pytest.mark.parametrize("invalid", ["speed_shape", "mask_shape", "nan", "foreign", "capsule"])
+def test_complete_reuse_validates_inputs_and_every_supplied_checkpoint(invalid):
+    phi, speed, mask = line_inputs()
+    mask[80] = True
+    state = tracked_state(phi, speed, mask)
+    state.advance()
+    saved = state.checkpoint()
+    before, stats = state.result(), state.stats
+    speed[140] = 2.0
+    candidates = []
+    if invalid == "speed_shape":
+        speed = speed[:-1]
+    elif invalid == "mask_shape":
+        mask = mask[:-1]
+    elif invalid == "nan":
+        speed[140] = np.nan
+    elif invalid == "foreign":
+        other = tracked_state(phi, speed, mask)
+        candidates = [other.checkpoint()]
+    else:
+        candidates = [object()]
+    with pytest.raises(ValueError):
+        state.replay(speed, mask, candidates)
+    assert state.stats == stats
+    assert_same(state.result(), before)
+    state.restore(saved)
 
 
 @pytest.mark.parametrize("change", ["source_speed", "initial_narrow_mask", "new_source"])

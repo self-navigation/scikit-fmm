@@ -58,6 +58,10 @@ public:
   void setDependencies(long long *first_read) { first_read_ = first_read; }
   std::size_t batchCount() const { return batches_; }
   bool complete() const { return complete_; }
+  bool isInert(int address) const {
+    return (flag_[address] == Far || flag_[address] == Mask) &&
+           heapptr_[address] == -1;
+  }
   std::size_t arrayBytes() const;
   std::size_t checkpointBytes() const;
 
